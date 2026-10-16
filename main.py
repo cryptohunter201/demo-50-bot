@@ -1,46 +1,52 @@
-import os, time, requests, traceback
+import time, requests
 
-print("[BOOT] LOGIKA LAMA + ANTI ERROR", flush=True)
+SYMBOLS = ["LIT-USDT","ONDO-USDT","SUI-USDT","ASTER-USDT","SOL-USDT"]
+pos = {} # simpan entry price
 
-SYMBOLS = ["LIT-USDT", "ONDO-USDT", "SUI-USDT", "ASTER-USDT", "SOL-USDT"]
-
-def get_candles(instId):
-    url = "https://www.okx.com/api/v5/market/candles"
+def get_candles(s):
     for _ in range(3):
         try:
-            r = requests.get(url, params={"instId": instId, "bar":"5m", "limit":100},
-                             timeout=15, headers={"User-Agent":"Mozilla/5.0"})
-            txt = r.text.strip()
-            if not txt.startswith("{"): # kalau dapet HTML
-                print(f"[WARN] {instId} HTML retry", flush=True)
-                time.sleep(3)
-                continue
-            j = r.json()
-            if j["code"]!= "0":
-                time.sleep(2)
-                continue
-            closes = [float(x[4]) for x in reversed(j["data"])]
-            return closes
-        except Exception as e:
-            print(f"[RETRY] {instId} {e}", flush=True)
-            time.sleep(3)
-    raise Exception("OKX HTML terus")
+            r = requests.get("https://www.okx.com/api/v5/market/candles",
+                params={"instId":s,"bar":"5m","limit":100},
+                timeout=15, headers={"User-Agent":"Mozilla/5.0"})
+            if not r.text.strip().startswith("{"): continue
+            j=r.json()
+            if j.get("code")!="0": continue
+            return [float(x[4]) for x in reversed(j["data"])]
+        except: time.sleep(2)
+    return None
 
-def ema(data, period):
-    k = 2/(period+1)
-    e = data[0]
-    for p in data[1:]: e = p*k + e*(1-k)
+def ema(d,p):
+    k=2/(p+1); e=d[0]
+    for x in d[1:]: e=x*k+e*(1-k)
     return e
 
-print("[OK] Start - no ccxt - LOGIKA TETAP", flush=True)
+print("[OK] BOT PAPER PROFIT - TANPA TELE", flush=True)
 
 while True:
-    for sym in SYMBOLS:
-        try:
-            closes = get_candles(sym)
-            e20 = ema(closes, 20)
-            e50 = ema(closes, 50)
-            print(f"[SCAN] {sym.replace('-','')} {closes[-1]:.4f} e20={e20:.4f} e50={e50:.4f}", flush=True)
-        except Exception as e:
-            print(f"[SCAN] {sym} err {e}", flush=True)
+    for s in SYMBOLS:
+        closes=get_candles(s)
+        if not closes: continue
+        price=closes[-1]
+        e20=ema(closes,20); e50=ema(closes,50)
+
+        name=s.replace('-','')
+        prev_e20=ema(closes[:-1],20)
+        prev_e50=ema(closes[:-1],50)
+
+        # BUY baru (cross up)
+        if e20>e50 and prev_e20<=prev_e50:
+            pos[name]=price
+            print(f"[BUY] {name} @ {price:.4f} e20>e50", flush=True)
+        # SELL (cross down) + hitung profit
+        elif e20<e50 and prev_e20>=prev_e50 and name in pos:
+            entry=pos.pop(name)
+            pnl=(price-entry)/entry*100
+            print(f"[SELL] {name} @ {price:.4f} Entry {entry:.4f} PNL {pnl:+.2f}%", flush=True)
+        else:
+            if name in pos:
+                pnl=(price-pos[name])/pos[name]*100
+                print(f"[HOLD] {name} {price:.4f} PNL {pnl:+.2f}%", flush=True)
+            else:
+                print(f"[SCAN] {name} {price:.4f} nunggu sinyal", flush=True)
     time.sleep(60)
