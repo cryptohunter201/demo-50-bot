@@ -1,5 +1,2 @@
-ccxt
-pandas
-numpy
-websocket-client
+ccxt>=4.2.0
 requests
