@@ -1,73 +1,46 @@
-# main.py - FINAL NO CCXT
-import os, time, sqlite3, requests, traceback, pathlib
+import os, time, requests, traceback
 
-TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", os.getenv("TELE_TOKEN", ""))
-TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", os.getenv("TELE_CHAT_ID", ""))
-DB_PATH = os.getenv("DB_PATH", "/data/neurobro_s50.db")
+print("[BOOT] LOGIKA LAMA + ANTI ERROR", flush=True)
 
-SYMBOLS = {
-    "LIT/USDT:USDT": "LITUSDT",
-    "ONDO/USDT:USDT": "ONDOUSDT",
-    "SUI/USDT:USDT": "SUIUSDT",
-    "ASTER/USDT:USDT": "ASTERUSDT",
-    "SOL/USDT:USDT": "SOLUSDT",
-    "HYPE/USDT:USDT": "HYPEUSDT",
-}
+SYMBOLS = ["LIT-USDT", "ONDO-USDT", "SUI-USDT", "ASTER-USDT", "SOL-USDT"]
 
-def ensure_dir():
-    pathlib.Path(DB_PATH).parent.mkdir(parents=True, exist_ok=True)
+def get_candles(instId):
+    url = "https://www.okx.com/api/v5/market/candles"
+    for _ in range(3):
+        try:
+            r = requests.get(url, params={"instId": instId, "bar":"5m", "limit":100},
+                             timeout=15, headers={"User-Agent":"Mozilla/5.0"})
+            txt = r.text.strip()
+            if not txt.startswith("{"): # kalau dapet HTML
+                print(f"[WARN] {instId} HTML retry", flush=True)
+                time.sleep(3)
+                continue
+            j = r.json()
+            if j["code"]!= "0":
+                time.sleep(2)
+                continue
+            closes = [float(x[4]) for x in reversed(j["data"])]
+            return closes
+        except Exception as e:
+            print(f"[RETRY] {instId} {e}", flush=True)
+            time.sleep(3)
+    raise Exception("OKX HTML terus")
 
-def tg(msg):
-    try:
-        if not TELEGRAM_BOT_TOKEN or not TELEGRAM_CHAT_ID:
-            print(f"[TG] SKIP")
-            return
-        url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
-        r = requests.post(url, json={"chat_id": TELEGRAM_CHAT_ID, "text": msg}, timeout=15)
-        print(f"[TG] {r.status_code}")
-    except Exception as e:
-        print(f"[TG] err {e}")
+def ema(data, period):
+    k = 2/(period+1)
+    e = data[0]
+    for p in data[1:]: e = p*k + e*(1-k)
+    return e
 
-def fetch_klines(bybit_symbol):
-    url = f"https://api.bybit.com/v5/market/kline"
-    params = {"category": "linear", "symbol": bybit_symbol, "interval": "5", "limit": 100}
-    r = requests.get(url, params=params, timeout=15)
-    data = r.json()
-    if data.get("retCode")!=0:
-        raise Exception(f"{data}")
-    klines = list(reversed(data["result"]["list"]))
-    return [[int(k[0]), float(k[1]), float(k[2]), float(k[3]), float(k[4]), float(k[5])] for k in klines]
+print("[OK] Start - no ccxt - LOGIKA TETAP", flush=True)
 
-def ema(data,p):
-    if len(data)<p: return None
-    k=2/(p+1)
-    ev=sum(data[:p])/p
-    for x in data[p:]:
-        ev=x*k+ev*(1-k)
-    return ev
-
-def main_loop():
-    ensure_dir()
-    con=sqlite3.connect(DB_PATH)
-    con.execute("CREATE TABLE IF NOT EXISTS trades (id INTEGER PRIMARY KEY)")
-    con.commit()
-    con.close()
-    tg("🤖 BOT NYALA - FINAL ANTI CRASH")
-    print("[OK] Start - no ccxt")
-
-    while True:
-        for ccxt_sym, bybit_sym in SYMBOLS.items():
-            try:
-                ohlcv = fetch_klines(bybit_sym)
-                closes = [c[4] for c in ohlcv]
-                e20 = ema(closes,20)
-                e50 = ema(closes,50)
-                print(f"[SCAN] {bybit_sym} {closes[-1]:.4f} e20={e20:.4f} e50={e50:.4f}")
-            except Exception as e:
-                print(f"[SCAN] {bybit_sym} err {e}")
-            time.sleep(0.5)
-        print("[SLEEP] 60s")
-        time.sleep(60)
-
-if __name__=="__main__":
-    main_loop()
+while True:
+    for sym in SYMBOLS:
+        try:
+            closes = get_candles(sym)
+            e20 = ema(closes, 20)
+            e50 = ema(closes, 50)
+            print(f"[SCAN] {sym.replace('-','')} {closes[-1]:.4f} e20={e20:.4f} e50={e50:.4f}", flush=True)
+        except Exception as e:
+            print(f"[SCAN] {sym} err {e}", flush=True)
+    time.sleep(60)
